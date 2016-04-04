@@ -20,6 +20,9 @@ __author__ = 'Kabir Abdulhamid / Upwork'
 # http://blog.niap3d.com/fr/4,10,news-50-Liste-des-communes-francaises.html
 # http://public.opendatasoft.com/explore/dataset/correspondance-code-insee-code-postal/
 
+# Google Geolocation API: https://console.developers.google.com/apis/credentials?project=resonant-fiber-126708
+# https://developers.google.com/maps/documentation/geocoding/intro#Geocoding
+
 import argparse
 import sys
 import re
@@ -204,9 +207,9 @@ if __name__ == "__main__":
     print('|                                                            |')
     print('| Client: Teddy Nestor                                       |')
     print('|                                                            |')
-    print('| v. 2.2 - 31/03/2016                                        |')
+    print('| v. 2.5 - 04/04/2016                                        |')
     print('| + export in Directory WP format                            |')
-    print('| + lat/long scrapting from                                  |')
+    print('| + lat/long scraping from Google geolocation API            |')
     print('+------------------------------------------------------------+')
 
     # create Merge dir if not exist
@@ -216,6 +219,9 @@ if __name__ == "__main__":
     # list of arguments
     l_parser = argparse.ArgumentParser(description='Merge Script for TNScrape CSV files')
     l_parser.add_argument('result', help='Name of Result')
+    l_parser.add_argument('--pureSlug',
+                          help='Company ID = name based slug with no number or CP at the end (default: False)',
+                          action='store_true')
     l_parser.add_argument('--noText', help='Remove text content from items (default: False)',
                           action='store_true')
     l_parser.add_argument('--geo', help='Fetch lat/long from Google Geo API (default: False)',
@@ -232,6 +238,7 @@ if __name__ == "__main__":
     class C:
         def __init__(self):
             self.result = None
+            self.pureSlug = False
             self.noText = False
             self.geo = False
             self.dir = g_MergeDir
@@ -245,6 +252,7 @@ if __name__ == "__main__":
 
     # local variables (why did I do this ?)
     l_dir = c.dir
+    l_pureSlug = c.pureSlug
     l_geoLoc = c.geo
     l_noText = c.noText
     l_password = c.password
@@ -279,7 +287,8 @@ if __name__ == "__main__":
     print('MySQL root Password :', c.password)
     print('Database            :', c.database)
     print('Remove Item Text    :', l_noText)
-    print('Geolocalization     :', l_geoLoc)
+    print('Geolocation         :', l_geoLoc)
+    print('Pure item slugs     :', l_pureSlug)
     print('--> Result Path     :', l_resultPath)
 
     l_connector = mysql.connector.connect(
@@ -461,6 +470,8 @@ if __name__ == "__main__":
                   `ID` varchar(5) DEFAULT NULL,
                   `NAME` varchar(200) DEFAULT NULL,
                   `PARENT` varchar(5) DEFAULT NULL,
+                  `SLUG` varchar(200) DEFAULT NULL,
+                  `SLUG_PARENT` varchar(200) DEFAULT NULL,
                   KEY `ID` (`ID`)
                 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
             """)
@@ -470,14 +481,25 @@ if __name__ == "__main__":
             next(l_reader, None)
 
             for r in l_reader:
+                l_slug = CommonFunctions.makeSlug(r[1])
+                if len(r[0]) == 5:
+                    l_slug += '-' + r[0]
+                r += [l_slug, '-']
                 l_query = """
-                        INSERT INTO TB_GEO
+                        INSERT INTO TB_GEO (
+                            `ID`
+                            , `NAME`
+                            , `PARENT`
+                            , `SLUG`
+                            , `SLUG_PARENT`
+                        )
                         VALUES( "{0}" )
                     """.format('", "'.join([re.sub('"', '""', x) for x in r]))
                 l_cursor.execute(l_query)
                 l_connector.commit()
 
             # Eliminate CP absent from the TB_GEO table (mostly CEDEX)
+            # Replace them with XX000 where XX is the département number
             l_cursor.execute("""
                 update
                     `{0}` as R
@@ -488,6 +510,29 @@ if __name__ == "__main__":
                 where
                     G.ID is null
             """.format(l_resultTableA))
+            l_connector.commit()
+
+            # Eliminate the remaining absent from the TB_GEO table after the operation above
+            # --> Divers (00000)
+            l_cursor.execute("""
+                update
+                    `{0}` as R
+                    left outer join TB_GEO as G
+                    on R.CP = G.ID
+                set
+                    R.CP = '00000'
+                where
+                    G.ID is null
+            """.format(l_resultTableA))
+            l_connector.commit()
+
+            # conect parent slugs
+            l_cursor.execute("""
+                update
+                    TB_GEO A join TB_GEO B on B.ID = A.PARENT
+                set
+                    A.SLUG_PARENT = B.SLUG
+            """)
             l_connector.commit()
 
             l_cursor.close()
@@ -521,36 +566,39 @@ if __name__ == "__main__":
         #                        'MAIL', 'WEB1', 'WEB2', 'WEB3', 'WEB4', 'HOURS', 'BUSINESS', 'ADDITIONAL'])
         l_cursor.execute("""
             select MERGE_KEY
-                , ID                       # 00 post_name
-                , NAME                      # 01 post_title
+                , R.CP
+                , R.ID                      # 00 post_name
+                , R.NAME                    # 01 post_title
                 , 'publish'                 # 02 post_status
-                , ADDITIONAL                # 03 post_content
-                , left(ADDITIONAL, 100)     # 04 post_excerpt
+                , R.ADDITIONAL              # 03 post_content
+                , left(R.ADDITIONAL, 100)   # 04 post_excerpt
                 , '1'                       # 05 post_author
                 , '0'                       # 06 post_parent
                 , '{1}'                     # 07 post_date
                 , 'closed'                  # 08 comment_status
                 , 'open'                    # 09 ping_status
                 , ''                        # 10 post_image
-                , BUSINESS                  # 11 ait-items
-                , CP                        # 12 ait-locations
+                , R.BUSINESS                # 11 ait-items
+                , case when G.SLUG is null then ' '
+                    else G.SLUG
+                  end                       # 12 ait-locations
                 , ''                        # 13 subtitle
                 , '1'                       # 14 featuredItem
                 , ''                        # 15 headerImage
                 , ''                        # 16 headerHeight
-                , concat(ADDRESS, ', ', CP, ' ', CITY)   # 17 address
+                , concat(R.ADDRESS, ', ', R.CP, ' ', R.CITY)   # 17 address
                 , ''                        # 18 latitude
                 , ''                        # 19 longitude
                 , '0'                       # 20 streetview
-                , TEL1                      # 21 telephone
-                , concat(TEL2, ' ', TEL3)   # 22 telephoneAdditional
-                , MAIL                      # 23 email
+                , R.TEL1                    # 21 telephone
+                , concat(R.TEL2, ' ', R.TEL3)   # 22 telephoneAdditional
+                , R.MAIL                    # 23 email
                 , '1'                       # 24 showEmail
                 , '1'                       # 25 contactOwnerBtn
-                , WEB1                      # 26 web
+                , R.WEB1                    # 26 web
                 , ''                        # 27 webLinkLabel
                 , '1'                       # 28 displayOpeningHours
-                , HOURS                     # 29 openingHoursMonday
+                , R.HOURS                   # 29 openingHoursMonday
                 , ''                        # 30 openingHoursTuesday
                 , ''                        # 31 openingHoursWednesday
                 , ''                        # 32 openingHoursThursday
@@ -569,20 +617,40 @@ if __name__ == "__main__":
                 , ''                        # 45 features@icon
                 , ''                        # 46 features@text
                 , ''                        # 47 features@desc
-            from `{0}`
-            order by left(CP,2),NAME
+            from `{0}` as R left outer join TB_GEO as G on R.CP = G.ID
+            order by R.NAME, R.CP
         """.format(
             l_resultView,
             (datetime.datetime.now() - datetime.timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S')))
 
+        l_prevSlugBare = ''
+        l_prevSlugCP = ''
+        l_slugCount = 0
         for l_row in l_cursor:
             l_row = list(l_row)
 
             l_mergeKey = l_row[0]
-            l_row = l_row[1:]
+            l_codePostal = l_row[1]
+            l_row = l_row[2:]
 
-            # item ID
-            l_row[0] = l_result + '_' + l_row[0]
+            # item ID <-- slug
+            l_name = l_row[1]
+            l_slugBare = CommonFunctions.makeSlug(l_name)
+            l_slugCP = CommonFunctions.makeSlug(l_name + '-' + l_codePostal)
+
+            if l_slugBare == l_prevSlugBare and not l_pureSlug:
+                if l_slugCP == l_prevSlugCP:
+                    l_slug = l_slugBare + '-' + str(l_slugCount)
+                    l_slugCount += 1
+                else:
+                    l_slug = l_slugCP
+                    l_prevSlugCP = l_slugCP
+            else:
+                l_slug = l_slugBare
+                l_slugCount = 0
+                l_prevSlugBare = l_slugBare
+
+            l_row[0] = l_slug
 
             # addres cleanup
             l_row[17] = re.sub('([;,:\.])[;,:\.]', r'\1', l_row[17])
@@ -605,6 +673,22 @@ if __name__ == "__main__":
 
                     # 20 streetview
                     l_row[20] = '1'
+
+                    l_geoMetatags = re.sub('\s+', ' ', ''"""
+                        <meta name="geo.placename" content="{0}" />
+                        <meta name="geo.position" content="{1};{2}" />
+                        <meta name="geo.region" content="FR-" />
+                        <meta name="ICBM" content="{1}, {2}" />
+                    """.format(l_address, l_lat, l_long)).strip()
+
+                    l_geoTags = re.sub('\s+', ' ', ''"""
+                        geotagged
+                        geo:lat={0}
+                        geo:lon={1}
+                    """.format(l_lat, l_long)).strip()
+
+                    # 46 features@text
+                    l_row[42] = l_geoMetatags + '|' + l_geoTags
 
                     l_geoLocCount += 1
 
@@ -771,25 +855,25 @@ if __name__ == "__main__":
         create view `{0}` as
         SELECT G.*
         FROM `TB_GEO` G join `{1}` A on A.CP = G.ID
-        group by G.ID, G.NAME, G.PARENT;
+        group by G.ID, G.NAME, G.PARENT, G.SLUG, G.SLUG_PARENT;
     """.format(l_geoView1, l_resultView))
 
     l_geoView2 = 'V_GEO2_' + re.sub('[^A-Za-z0-9]', '_', l_result).upper()
     l_cursor.execute(g_viewTemplateDrop.format(l_geoView2))
     l_cursor.execute("""
-        CREATE VIEW `{0}` AS SELECT G . *
-        FROM `TB_GEO` G
-        JOIN `{1}` A ON A.PARENT = G.ID
-        group by G.ID, G.NAME, G.PARENT;
+        CREATE VIEW `{0}` AS
+        SELECT G.*
+        FROM `TB_GEO` G JOIN `{1}` A ON A.PARENT = G.ID
+        group by G.ID, G.NAME, G.PARENT, G.SLUG, G.SLUG_PARENT;
     """.format(l_geoView2, l_geoView1))
 
     l_geoView3 = 'V_GEO3_' + re.sub('[^A-Za-z0-9]', '_', l_result).upper()
     l_cursor.execute(g_viewTemplateDrop.format(l_geoView3))
     l_cursor.execute("""
-        CREATE VIEW `{0}` AS SELECT G . *
-        FROM `TB_GEO` G
-        JOIN `{1}` A ON A.PARENT = G.ID
-        group by G.ID, G.NAME, G.PARENT;
+        CREATE VIEW `{0}` AS
+        SELECT G.*
+        FROM `TB_GEO` G JOIN `{1}` A ON A.PARENT = G.ID
+        group by G.ID, G.NAME, G.PARENT, G.SLUG, G.SLUG_PARENT;
     """.format(l_geoView3, l_geoView2))
 
     l_geoView = 'V_GEO_' + re.sub('[^A-Za-z0-9]', '_', l_result).upper()
@@ -813,12 +897,12 @@ if __name__ == "__main__":
 
         l_cursor = l_connector.cursor(buffered=True)
         l_cursor.execute("""
-            select ID       # slug
+            select SLUG         # slug
                 , case when LENGTH(ID) < 5 then NAME
                     else concat(NAME, ' (', ID, ')')
                     end
-                , ''        # description
-                , PARENT    # parent
+                , ''            # description
+                , SLUG_PARENT   # parent
             from `{0}`
             order by
                 (case when PARENT = '-' then 1
@@ -850,7 +934,7 @@ if __name__ == "__main__":
     print('{0:<60}: -{1}'.format('Duplicates', l_totalCount-l_totalMerged))
     print('{0:<60}:  {1}'.format('Merged count (output to {0})'.format(l_resultPath), l_totalMerged))
     if l_geoLoc:
-        print('{0:<60}:  {1}'.format('Successful geolocalizations', l_geoLocCount))
+        print('{0:<60}:  {1}'.format('Successful geolocaions', l_geoLocCount))
     print('----------------------------------------------------------------------')
 
     l_connector.close()

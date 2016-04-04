@@ -3,6 +3,10 @@
 
 __author__ = 'Kabir Abdulhamid / Upwork'
 
+# REQUIRED PACKAGES & INPUTS
+
+# selenium : pip3 install -U selenium (to get pip: sudo apt-get install python3-pip)
+
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
@@ -378,7 +382,7 @@ if __name__ == "__main__":
     print('|                                                            |')
     print('| Client: Teddy Nestor                                       |')
     print('|                                                            |')
-    print('| v. 2.2 - 30/03/2016                                        |')
+    print('| v. 2.3 - 04/04/2016                                        |')
     print('| + réupération des horaires                                 |')
     print('+------------------------------------------------------------+')
 

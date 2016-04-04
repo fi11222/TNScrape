@@ -11,6 +11,7 @@ import time
 import urllib.parse
 import urllib.request
 import json
+import unicodedata
 
 from selenium import webdriver
 
@@ -28,7 +29,7 @@ g_googleKey = 'AIzaSyDJxO78EbjQ0hwhY3bK4_fsgB4Q1lmZG9o'
 
 # get a lat/long pair from Google Geolocalization API
 def getLatLong(p_address):
-    print('### Address to geolocalise:', p_address)
+    print('### Address to geolocate:', p_address)
 
     # build request url
     l_url = g_latLongUrl + urllib.parse.urlencode({'address': p_address}) + \
@@ -208,6 +209,17 @@ def getDriver():
 
     return l_driver
 
+def makeSlug(p_name):
+    l_slug = re.sub('\s+', ' ', p_name).strip()
+
+    l_slug = ''.join((c for c in unicodedata.normalize('NFD', l_slug) if unicodedata.category(c) != 'Mn'))
+
+    l_slug = re.sub('\W+', '-', l_slug)
+    l_slug = re.sub('-$', '', l_slug)
+    l_slug = re.sub('_', '-', l_slug).lower()
+
+    return l_slug
+
 # ---------------------------------------------------- Main section ----------------------------------------------------
 
 if __name__ == "__main__":
@@ -218,7 +230,7 @@ if __name__ == "__main__":
     print('|                                                            |')
     print('| Client: Teddy Nestor                                       |')
     print('|                                                            |')
-    print('| v. 1.3 - 31/03/2016                                        |')
+    print('| v. 1.5 - 04/04/2016                                        |')
     print('+------------------------------------------------------------+')
 
     getLatLong('75 rue du javelot 75013 paris france')

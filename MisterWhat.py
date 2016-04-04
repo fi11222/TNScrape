@@ -21,7 +21,6 @@ import os
 import urllib.parse
 import urllib.request
 import random
-import time
 import subprocess
 import csv
 from lxml import html
@@ -344,7 +343,7 @@ if __name__ == "__main__":
     print('|                                                            |')
     print('| Client: Teddy Nestor                                       |')
     print('|                                                            |')
-    print('| v. 1.4 - 30/03/2016                                        |')
+    print('| v. 1.5 - 04/04/2016                                        |')
     print('+------------------------------------------------------------+')
 
     random.seed()
